@@ -1,169 +1,65 @@
-import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import App from './App';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import PostManager from './PostManager';
+import { rest } from 'msw';
+import { setupServer } from 'msw/node';
 
-const queryClient = new QueryClient();
+const API_URL = 'https://jsonplaceholder.typicode.com/posts';
 
-test('renders learn react link', () => {
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+const server = setupServer(
+  rest.get(API_URL, (req, res, ctx) => {
+    return res(ctx.json([{ id: 1, title: 'Post 1', body: 'Body 1', userId: 1 }]));
+  })
+);
+
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+test('fetches and displays posts with no filter', async () => {
+  render(<PostManager />);
+  expect(await screen.findByText('Post 1')).toBeInTheDocument();
 });
 
-global.fetch = jest.fn();
+test('creates a new post', async () => {
+  render(<PostManager />);
+  fireEvent.change(screen.getByPlaceholderText('title'), { target: { value: 'New Post' } });
+  fireEvent.change(screen.getByPlaceholderText('body'), { target: { value: 'New Body' } });
+  fireEvent.change(screen.getByPlaceholderText('user id'), { target: { value: '1' } });
+  fireEvent.click(screen.getByText('Submit'));
 
-describe('App component', () => {
-  beforeEach(() => {
-    fetch.mockClear();
-  });
-
-  test('renders posts from API', async () => {
-    fetch.mockResolvedValueOnce({
-      json: jest.fn().mockResolvedValue([
-        { id: 1, title: 'Post 1' },
-        { id: 2, title: 'Post 2' },
-      ]),
-    });
-  
-    render(
-      <QueryClientProvider client={queryClient}>
-        <App />
-      </QueryClientProvider>
-    );
-  
-    const post1 = await screen.findByText('Post 1');
-    const post2 = await screen.findByText('Post 2');
-  
-    expect(post1).toBeInTheDocument();
-    expect(post2).toBeInTheDocument();
-  });
+  expect(await screen.findByText('New Post')).toBeInTheDocument();
 });
 
-test('displays loading state while fetching data', async () => {
-  global.fetch = jest.fn(() =>
-    Promise.resolve({
-      json: () => Promise.resolve([ { id: 1, title: 'Post 1', body: 'Body 1', userId: 1 } ]) 
-    })
-  );
+test('updates an existing post', async () => {
+  render(<PostManager />);
+  fireEvent.change(screen.getByPlaceholderText('title'), { target: { value: 'Updated Post' } });
+  fireEvent.change(screen.getByPlaceholderText('body'), { target: { value: 'Updated Body' } });
+  fireEvent.change(screen.getByPlaceholderText('user id'), { target: { value: '1' } });
+  fireEvent.click(screen.getByText('Edit'));
 
-  render(
-    <QueryClientProvider client={queryClient}>
-      <PostManager />
-    </QueryClientProvider>
-  );
-
-  expect(screen.getByText(/loading/i)).toBeInTheDocument();
-
-  await waitFor(() => {
-    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-  });
-
-  const post1 = await screen.findByText('Post 1');
-  expect(post1).toBeInTheDocument();
+  expect(await screen.findByText('Updated Post')).toBeInTheDocument();
 });
 
-test('handles fetch error gracefully', async () => {
-  fetch.mockRejectedValueOnce(new Error('Failed to fetch'));
+test('fetches posts with invalid user ID', async () => {
+  render(<PostManager />);
+  fireEvent.change(screen.getByPlaceholderText('Filter by user ID'), { target: { value: '-1' } });
 
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-
-  await waitFor(() => {
-    expect(screen.queryByText('Post 1')).not.toBeInTheDocument();
-  });
-
-  await waitFor(() => {
-    expect(screen.queryByText('Post 2')).not.toBeInTheDocument();
-  });
-
-  expect(screen.getByText(/something went wrong/i)).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText('Post 1')).not.toBeInTheDocument());
 });
 
-test('handles empty response gracefully', async () => {
-  fetch.mockResolvedValueOnce({
-    json: jest.fn().mockResolvedValue([]),
-  });
+test('does not create a post with missing fields', async () => {
+  render(<PostManager />);
+  fireEvent.change(screen.getByPlaceholderText('title'), { target: { value: '' } });
+  fireEvent.change(screen.getByPlaceholderText('body'), { target: { value: 'New Body' } });
+  fireEvent.change(screen.getByPlaceholderText('user id'), { target: { value: '1' } });
+  fireEvent.click(screen.getByText('Submit'));
 
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-
-  await waitFor(() => {
-    expect(screen.queryByText('Post 1')).not.toBeInTheDocument();
-  });
-
-  await waitFor(() => {
-    expect(screen.queryByText('Post 2')).not.toBeInTheDocument();
-  });
-
-  expect(screen.getByText(/no posts available/i)).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText('New Body')).not.toBeInTheDocument());
 });
 
-test('handles unexpected data gracefully', async () => {
-  fetch.mockResolvedValueOnce({
-    json: jest.fn().mockResolvedValue([{ id: 1 }]),
-  });
+test('handles deletion of a non-existent post', async () => {
+  render(<PostManager />);
+  fireEvent.click(screen.getByText('Delete'));
 
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-
-  await waitFor(() => {
-    expect(screen.queryByText('Post 1')).not.toBeInTheDocument();
-  });
-
-  expect(screen.getByText(/unexpected data format/i)).toBeInTheDocument();
-});
-
-test('makes multiple fetch requests when needed', async () => {
-  fetch.mockResolvedValueOnce({
-    json: jest.fn().mockResolvedValue([{ id: 1, title: 'Post 1' }]),
-  }).mockResolvedValueOnce({
-    json: jest.fn().mockResolvedValue([{ id: 2, title: 'Post 2' }]),
-  });
-
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-
-  await waitFor(() => {
-    expect(screen.getByText('Post 1')).toBeInTheDocument();
-  });
-
-  await waitFor(() => {
-    expect(screen.getByText('Post 2')).toBeInTheDocument();
-  });
-
-  expect(fetch).toHaveBeenCalledTimes(2);
-});
-
-test('shows "no posts available" when no data is returned', async () => {
-  fetch.mockResolvedValueOnce({
-    json: jest.fn().mockResolvedValue([]),
-  });
-
-  render(
-    <QueryClientProvider client={queryClient}> {/* Wrap with QueryClientProvider */}
-      <App />
-    </QueryClientProvider>
-  );
-
-  await waitFor(() => {
-    expect(screen.getByText(/no posts available/i)).toBeInTheDocument();
-  });
+  expect(await screen.findByText('Error deleting post')).toBeInTheDocument();
 });
